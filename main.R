@@ -1,3 +1,10 @@
+## Open Shell from Rstudio 
+# 1. Go to the Git tab 
+# 2. Click the tab More 
+# 3. Select Shell... 
+## Run Rscript from Shell 
+# 1. In the Shell, run the command: nohup R CMD BATCH main.R > main.log & 
+# 2. Close the Shell window 
 
 library(tidyverse)
 library(sf)
