@@ -103,9 +103,7 @@ pggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.Gaus
     else stop("Bandwidth must be given for non-adaptive weights")
   }
   else {
-    # Too slow ... NOT SURE IT WORKS 
-    # bandwidth <- gw.adapt(dp = coords, fp = fit.points, quant = adapt, longlat = longlat)
-    
+
     warning(cat("\nStarting parallel bandwidth processing using",n_cores,"cores\n"))
     cl <- parallel::makeForkCluster(nnodes = getOption("mc.cores", n_cores))
     
@@ -137,39 +135,47 @@ pggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.Gaus
   
   if (any(bandwidth < 0)) 
     stop("Invalid bandwidth")
-  
-  fun <- function(i){
-    dxs <- spDistsN1(coords, fit.points[i, ], longlat = longlat)
-    if (any(!is.finite(dxs)))
-      dxs[which(!is.finite(dxs))] <- .Machine$double.xmax/2
+
+  fun <- function(df_list){
+
+    n <- nrow(df_list$fit.points)
+    gwr.b <- matrix(nrow = n, ncol = 1)
+    v_resids <- numeric(n)
+    colnames(gwr.b) <- colnames(x)
+    lhat <- NA
+    sum.w <- numeric(n)
+    dispersion <- numeric(n)
     
-    w.i <- gweight(dxs^2, bandwidth[i])
-    
-    if (any(w.i < 0 | is.na(w.i)))
-      stop(paste("Invalid weights for i:", i))
-    
-    lm.i <- glm.fit(y = y, x = x, weights = w.i, offset = offset, family = family)
-    sum.w <- sum(w.i)
-    gwr.b <- coefficients(lm.i)
-    
-    v_resids <- 0
-    if (!fp.given)
-      v_resids <- residuals.glm(lm.i, type = type)[i]
-    else is.na(v_resids) <- TRUE
-    
-    df.r <- lm.i$df.residual
-    
-    if (lm.i$family$family %in% c("poisson", "binomial"))
-      dispersion <- 1
-    else {
-      if (df.r > 0) {
-        dispersion <- sum((lm.i$weights * lm.i$residuals^2)[lm.i$weights > 0])/df.r
-      }
+    for (i in 1:n) {
+      dxs <- spDistsN1(coords, df_list$fit.points[i, ], longlat = longlat)
+      if (any(!is.finite(dxs))) 
+        dxs[which(!is.finite(dxs))] <- .Machine$double.xmax/2
+      w.i <- gweight(dxs^2, df_list$bandwidth[i])
+      if (any(w.i < 0 | is.na(w.i))) 
+        stop(paste("Invalid weights for i:", i))
+      lm.i <- glm.fit(y = y, x = x, weights = w.i, offset = offset, 
+                      family = family)
+      sum.w[i] <- sum(w.i)
+      gwr.b[i, ] <- coefficients(lm.i)
+      if (!fp.given) 
+        v_resids[i] <- residuals.glm(lm.i, type = type)[i]
+      else is.na(v_resids[i]) <- TRUE
+      df.r <- lm.i$df.residual
+      if (lm.i$family$family %in% c("poisson", "binomial")) 
+        dispersion[i] <- 1
       else {
-        dispersion <- NaN
+        if (df.r > 0) {
+          dispersion[i] <- sum((lm.i$weights * lm.i$residuals^2)[lm.i$weights > 
+                                                                   0])/df.r
+        }
+        else {
+          dispersion[i] <- NaN
+        }
       }
     }
+    
     return(data.frame(sum.w = sum.w, gwr.b, dispersion = dispersion, v_resids = v_resids))
+    
   }
   
   # Start cluster 
@@ -181,10 +187,8 @@ pggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.Gaus
   varlist <- list("coords", "fit.points", "bandwidth", "x", "y", "family", "offset", "type", "fp.given", "longlat")
   env <- new.env()
   assign("coords", coords, envir = env)
-  assign("fit.points", fit.points, envir = env)
   assign("y", y, envir = env)
   assign("x", x, envir = env)
-  assign("bandwidth", weights, envir = env)
   assign("family", family, envir = env)
   assign("offset", offset, envir = env)
   assign("type", type, envir = env)
@@ -192,8 +196,11 @@ pggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.Gaus
   assign("longlat", longlat, envir = env)
   parallel::clusterExport(cl, varlist, env)
   
+  # Split fit points 
+  l_fp <- lapply(parallel::splitIndices(nrow(fit.points), length(cl)), function(i) list(fit.points = fit.points[i, , drop = FALSE], bandwidth = bandwidth[i]) )
+  
   # Run parallel processing 
-  df <- dplyr::bind_rows(parallel::parLapply(cl, 1:n, fun = fun))
+  df <- dplyr::bind_rows(parallel::parLapply(cl, l_fp, fun = fun))
   
   # Clean cluster env
   parallel::clusterEvalQ(cl, rm(varlist))
