@@ -15,6 +15,9 @@ library(spgwr)
 library(parallel)
 source("pggwr.R")
 
+# Set number of cores 
+n_cores <- 4L
+
 # Read training_samplesamples as tibble 
 training_samples <- readr::read_csv("./data/train_data_cci20.csv")
 
@@ -68,7 +71,7 @@ grid_cont <- sf::st_make_grid(vgi_data, cellsize = 0.1, what = "centers")
 # grid_cont <- sf::st_make_grid(vgi_data, cellsize = 0.1, what = "centers")
 
 # Run parallel 
-poc_time <- system.time(gwr_model <- pggwr(formula = value~1, data = as(vgi_data, "Spatial"), adapt = 0.01, n_cores = 24L,
+poc_time <- system.time(gwr_model <- pggwr(formula = value~1, data = as(vgi_data, "Spatial"), adapt = 0.01, n_cores = n_cores,
                                            fit.points = as(grid_cont, "Spatial"), family = binomial, longlat = TRUE))
 poc_time
 
