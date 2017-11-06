@@ -1,14 +1,13 @@
 #' @title Parallel - Generalised geographically weighted regression
 #' @name get
-#' @author Victor Maus, \email{vwmaus1@@gmail.com}
 #' 
-#' @description The function implements generalised geographically weighted regression 
-#' approach to exploring spatial non-stationarity for given global bandwidth and chosen 
-#' weighting scheme.
+#' @description This is a parallel version adpted from spgwr::ggwr. The function runs a 
+#' generalised geographically weighted regression approach to exploring spatial non-stationarity 
+#' for given global bandwidth and chosen weighting scheme. 
 #' 
 #' @inheritParams twdtwMatches-class
-#' @param n_cores an integer. Default all available colors minus one 
-#' @praam ... other arguments see ?spgwr::ggwr 
+#' @param n_cores an integer. Default is all available cores minus one 
+#' @praam ... for other arguments see ?spgwr::ggwr 
 #' 
 pggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.Gauss, 
                    adapt = NULL, fit.points, family = gaussian, longlat = NULL,
