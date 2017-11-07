@@ -9,7 +9,7 @@
 #' @param n_cores an integer. Default is all available cores minus one 
 #' @praam ... for other arguments see ?spgwr::ggwr 
 #' 
-pggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.Gauss, 
+par_ggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.Gauss, 
                    adapt = NULL, fit.points, family = gaussian, longlat = NULL,
                    type = c("working", "deviance", "pearson", "response"), n_cores = parallel::detectCores() - 1){
   
@@ -94,96 +94,11 @@ pggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.Gaus
   if (NROW(x) != NROW(coords)) 
     stop("Input data and coordinates have different dimensions")
   
-  if (is.null(adapt)) {
-    if (!missing(bandwidth)) {
-      bw <- bandwidth
-      bandwidth <- rep(bandwidth, n)
-    }
-    else stop("Bandwidth must be given for non-adaptive weights")
-  }
-  else {
-
-    warning(cat("\nStarting parallel bandwidth processing using",n_cores,"cores\n"))
-    cl <- parallel::makeForkCluster(nnodes = getOption("mc.cores", n_cores))
-    
-    # Set cluster env
-    parallel::clusterEvalQ(cl, library(spgwr))
-    varlist <- list("coords", "fit.points", "adapt", "longlat")
-    env <- new.env()
-    assign("coords", coords, envir = env)
-    assign("fit.points", fit.points, envir = env)
-    assign("adapt", adapt, envir = env)
-    assign("longlat", longlat, envir = env)
-    parallel::clusterExport(cl, varlist, env)
-    
-    # Split fit points 
-    l_fp <- lapply(parallel::splitIndices(nrow(fit.points), length(cl)), function(i) fit.points[i, , drop = FALSE])
-    
-    # Run parallel processing 
-    bandwidth <- unlist(parallel::parLapply(cl, l_fp, function(fp) gw.adapt(dp = coords, fp = fp, quant = adapt, longlat = longlat)))
-    
-    # Clean cluster env
-    parallel::clusterEvalQ(cl, rm(varlist))
-    rm(env)
-    
-    # Stop cluster 
-    stopCluster(cl)
-    
-    bw <- bandwidth
-  }
-  
-  if (any(bandwidth < 0)) 
-    stop("Invalid bandwidth")
-
-  fun <- function(df_list){
-
-    n <- nrow(df_list$fit.points)
-    gwr.b <- matrix(nrow = n, ncol = 1)
-    v_resids <- numeric(n)
-    colnames(gwr.b) <- colnames(x)
-    lhat <- NA
-    sum.w <- numeric(n)
-    dispersion <- numeric(n)
-    
-    for (i in 1:n) {
-      dxs <- spDistsN1(coords, df_list$fit.points[i, ], longlat = longlat)
-      if (any(!is.finite(dxs))) 
-        dxs[which(!is.finite(dxs))] <- .Machine$double.xmax/2
-      w.i <- gweight(dxs^2, df_list$bandwidth[i])
-      if (any(w.i < 0 | is.na(w.i))) 
-        stop(paste("Invalid weights for i:", i))
-      lm.i <- glm.fit(y = y, x = x, weights = w.i, offset = offset, 
-                      family = family)
-      sum.w[i] <- sum(w.i)
-      gwr.b[i, ] <- coefficients(lm.i)
-      if (!fp.given) 
-        v_resids[i] <- residuals.glm(lm.i, type = type)[i]
-      else is.na(v_resids[i]) <- TRUE
-      df.r <- lm.i$df.residual
-      if (lm.i$family$family %in% c("poisson", "binomial")) 
-        dispersion[i] <- 1
-      else {
-        if (df.r > 0) {
-          dispersion[i] <- sum((lm.i$weights * lm.i$residuals^2)[lm.i$weights > 
-                                                                   0])/df.r
-        }
-        else {
-          dispersion[i] <- NaN
-        }
-      }
-    }
-    
-    return(data.frame(sum.w = sum.w, gwr.b, dispersion = dispersion, v_resids = v_resids))
-    
-  }
-  
-  # Start cluster 
-  warning(cat("\nStarting parallel processing using",n_cores,"cores\n"))
   cl <- parallel::makeForkCluster(nnodes = getOption("mc.cores", n_cores))
   
   # Set cluster env
   parallel::clusterEvalQ(cl, library(spgwr))
-  varlist <- list("coords", "fit.points", "bandwidth", "x", "y", "family", "offset", "type", "fp.given", "longlat")
+  varlist <- list("coords", "x", "y", "family", "offset", "type", "fp.given", "longlat", "adapt", "n")
   env <- new.env()
   assign("coords", coords, envir = env)
   assign("y", y, envir = env)
@@ -192,14 +107,76 @@ pggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.Gaus
   assign("offset", offset, envir = env)
   assign("type", type, envir = env)
   assign("fp.given", fp.given, envir = env)
-  assign("longlat", longlat, envir = env)
-  parallel::clusterExport(cl, varlist, env)
+  assign("adapt", adapt, envir = env)
   
-  # Split fit points 
-  l_fp <- lapply(parallel::splitIndices(nrow(fit.points), length(cl)), function(i) list(fit.points = fit.points[i, , drop = FALSE], bandwidth = bandwidth[i]) )
+  if (is.null(adapt)) {
+    if (!missing(bandwidth)) {
+      bw <- bandwidth
+      fit.points <- cbind(fit.points, rep(bandwidth, n))
+    }
+    else stop("Bandwidth must be given for non-adaptive weights")
+  }
+  else {
+
+    cat("\nComputing bandwidth using",n_cores,"cores...")
+    start_time <- Sys.time()
+    bw <- parallel::parRapply(cl, fit.points, function(fp) gw.adapt(dp = coords, fp = cbind(fp[1], fp[2]), quant = adapt, longlat = longlat))
+    cat(" Done\n")
+    fit.points <- cbind(fit.points, bw)
+    end_time <- Sys.time()
+    print(end_time - start_time)
+  }
   
-  # Run parallel processing 
-  df <- dplyr::bind_rows(parallel::parLapply(cl, l_fp, fun = fun))
+  if (any(bw < 0) | any(is.na(bw))) 
+    stop("Invalid bandwidth NA or lower than 0 (zero). It must be greater than 0 (zero)")
+
+  fun <- function(pto){
+    
+    dxs <- sp::spDistsN1(coords, cbind(pto[1], pto[2]), longlat = longlat)
+    
+    if (any(!is.finite(dxs)))
+      dxs[which(!is.finite(dxs))] <- .Machine$double.xmax/2
+    
+    w.i <- gweight(dxs^2, pto[3])
+    
+    lm.i <- glm.fit(y = y, x = x, weights = w.i, offset = offset, family = family)
+    sum.w <- sum(w.i)
+    gwr.b <- coefficients(lm.i)
+    
+    v_resids <- 0
+    if (!fp.given)
+      v_resids <- residuals.glm(lm.i, type = type)[1]
+    else is.na(v_resids) <- TRUE
+    
+    df.r <- lm.i$df.residual
+    
+    if (lm.i$family$family %in% c("poisson", "binomial"))
+      dispersion <- 1
+    
+    else {
+      if (df.r > 0) {
+        dispersion <- sum((lm.i$weights * lm.i$residuals^2)[lm.i$weights > 0])/df.r
+      }
+      else {
+        dispersion <- NaN
+      }
+    }
+    return(data.frame(x = pto[1], y = pto[2], bw = pto[3], sum.w = sum.w, gwr.b, dispersion = dispersion, v_resids = v_resids))
+  }
+
+  cat("\nProcessing using",n_cores,"cores...")
+  start_time <- Sys.time()
+  df <- parallel::parRapply(cl, fit.points, FUN = fun)
+  cat(" Done\n")
+  end_time <- Sys.time()
+  print(end_time - start_time)
+
+  cat("\nCreating output data frame...")
+  start_time <- Sys.time()
+  df <- dplyr::bind_rows(df)
+  cat(" Done\n")
+  end_time <- Sys.time()
+  print(end_time - start_time)
   
   # Clean cluster env
   parallel::clusterEvalQ(cl, rm(varlist))
@@ -207,16 +184,36 @@ pggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.Gaus
 
   # Stop cluster 
   stopCluster(cl)
+
+  xy <- df %>% 
+    dplyr::select(x, y)
   
-  SDF <- SpatialPointsDataFrame(coords = fit.points, data = df, proj4string = CRS(p4s))
+  bw <- df %>% 
+    dplyr::select(bw)
+  
+  df <- df %>% 
+    dplyr::select(-c(x, y, bw))
+
+  cat("\nBuilding Spatial object...")  
+  start_time <- Sys.time()
+  SDF <- SpatialPointsDataFrame(coords = xy, data = df, proj4string = CRS(p4s))
+  cat(" Done\n")
+  end_time <- Sys.time()
+  print(end_time - start_time)
+  
   if (griddedObj) {
     gridded(SDF) <- TRUE
   }
   else {
     if (!is.null(Polys)) {
+      cat("\nBuilding polygons...")
+      start_time <- Sys.time()
       df <- data.frame(SDF@data)
       rownames(df) <- sapply(slot(Polys, "polygons"), function(i) slot(i,"ID"))
       SDF <- SpatialPolygonsDataFrame(Sr = Polys, data = df)
+      cat(" Done\n")
+      end_time <- Sys.time()
+      print(end_time - start_time)
     }
   }
 

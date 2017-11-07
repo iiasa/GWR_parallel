@@ -13,10 +13,10 @@ library(raster)
 library(rgdal)
 library(spgwr)
 library(parallel)
-source("pggwr.R")
+source("par_ggwr.R")
 
 # Set number of cores 
-n_cores <- 4L
+n_cores <- 32L
 
 # Read training_samplesamples as tibble 
 training_samples <- readr::read_csv("./data/train_data_cci20.csv")
@@ -55,24 +55,24 @@ training_samples <- training_samples %>%
 # Get coordinates 
 coords <- sf::st_coordinates(training_samples)
 
-# Create vgi input 
-vgi_data <- 
-  training_samples %>% 
+# Create vgi input
+vgi_data <-
+  training_samples %>%
   dplyr::transmute(value = ifelse(RASTERVALU == tr_data, 1, 0), tr_data = tr_data)
 
-# Create vgi grid output  
-grid_cont <- sf::st_make_grid(vgi_data, cellsize = 0.1, what = "centers") 
+# Create vgi grid output
+grid_cont <- sf::st_make_grid(vgi_data, cellsize = 0.1, what = "centers")
 
 ## Subset for testing 
-# vgi_data <-
-#   training_samples %>%
-#   dplyr::slice(1:50) %>%
-#   dplyr::transmute(value = ifelse(RASTERVALU == tr_data, 1, 0), tr_data = tr_data)
-# grid_cont <- sf::st_make_grid(vgi_data, cellsize = 0.1, what = "centers")
+# aux <- grid_cont
+# grid_cont <- aux %>%
+#   sf::st_sf() %>%
+#   dplyr::slice(1:100) %>%
+#   sf::st_geometry()
 
 # Run parallel 
-poc_time <- system.time(gwr_model <- pggwr(formula = value~1, data = as(vgi_data, "Spatial"), adapt = 0.01, n_cores = n_cores, 
-                                           fit.points = as(grid_cont, "Spatial"), family = binomial, longlat = TRUE))
+poc_time <- system.time(gwr_model <- par_ggwr(formula = value~1, data = as(vgi_data, "Spatial"), adapt = 0.01, n_cores = n_cores,
+                                              fit.points = as(grid_cont, "Spatial"), family = binomial, longlat = TRUE))
 poc_time
 
 # Apply logistic transformation 
@@ -87,7 +87,4 @@ plot(r)
 
 # Write raster to disc
 writeRaster(r, filename = "gwr_res_ov.tif", format='HFA', overwrite = TRUE)
-
-
-
 
