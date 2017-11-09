@@ -39,4 +39,8 @@ nohup.out
 *.Rout
 *.log
 *.img
+*.pdf
+*.png
+
+
 
