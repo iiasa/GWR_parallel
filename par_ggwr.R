@@ -7,11 +7,13 @@
 #' 
 #' @inheritParams twdtwMatches-class
 #' @param n_cores an integer. Default is all available cores minus one 
+#' @param max_dist maximum distance from the sample point in the metric of the points if longlat = FALSE, 
+#' or in kilometers if longlat = TRUE. Default is NULL.
 #' @praam ... for other arguments see ?spgwr::ggwr 
 #' 
 par_ggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.Gauss, 
                    adapt = NULL, fit.points, family = gaussian, longlat = NULL,
-                   type = c("working", "deviance", "pearson", "response"), n_cores = parallel::detectCores() - 1){
+                   type = c("working", "deviance", "pearson", "response"), n_cores = parallel::detectCores() - 1, max_dist = NULL){
   
   type <- match.arg(type)
   resid_name <- paste(type, "resids", sep = "_")
@@ -98,7 +100,7 @@ par_ggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.G
   
   # Set cluster env
   parallel::clusterEvalQ(cl, library(spgwr))
-  varlist <- list("coords", "x", "y", "family", "offset", "type", "fp.given", "longlat", "adapt", "n")
+  varlist <- list("coords", "x", "y", "family", "offset", "type", "fp.given", "longlat", "adapt", "n", "max_dist")
   env <- new.env()
   assign("coords", coords, envir = env)
   assign("y", y, envir = env)
@@ -108,6 +110,7 @@ par_ggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.G
   assign("type", type, envir = env)
   assign("fp.given", fp.given, envir = env)
   assign("adapt", adapt, envir = env)
+  assign("max_dist", max_dist, envir = env)
   
   if (is.null(adapt)) {
     if (!missing(bandwidth)) {
@@ -120,7 +123,7 @@ par_ggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.G
 
     cat("\nComputing bandwidth using",n_cores,"cores...")
     start_time <- Sys.time()
-    bw <- parallel::parRapply(cl, fit.points, function(fp) gw.adapt(dp = coords, fp = cbind(fp[1], fp[2]), quant = adapt, longlat = longlat))
+    bw <- parallel::parRapply(cl, fit.points, function(fp) spgwr::gw.adapt(dp = coords, fp = cbind(fp[1], fp[2]), quant = adapt, longlat = longlat))
     cat(" Done\n")
     fit.points <- cbind(fit.points, bw)
     end_time <- Sys.time()
@@ -136,10 +139,17 @@ par_ggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.G
     
     if (any(!is.finite(dxs)))
       dxs[which(!is.finite(dxs))] <- .Machine$double.xmax/2
+
+    I <- seq_along(dxs)
     
-    w.i <- gweight(dxs^2, pto[3])
+    if(!is.null(max_dist))
+      I <- which(dxs <= max_dist)
+
+    w.i <- gweight(dxs[I]^2, pto[3])
     
-    lm.i <- glm.fit(y = y, x = x, weights = w.i, offset = offset, family = family)
+    lm.i <- glm.fit(y = y[I], x = matrix(x[I,], ncol = 1), 
+                    weights = w.i, offset = offset[I], family = family)
+    
     sum.w <- sum(w.i)
     gwr.b <- coefficients(lm.i)
     
@@ -167,6 +177,7 @@ par_ggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.G
   cat("\nProcessing using",n_cores,"cores...")
   start_time <- Sys.time()
   df <- parallel::parRapply(cl, fit.points, FUN = fun)
+  # df <- apply(fit.points, 1, FUN = fun)
   cat(" Done\n")
   end_time <- Sys.time()
   print(end_time - start_time)

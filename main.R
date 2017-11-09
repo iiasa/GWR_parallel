@@ -3,7 +3,7 @@
 # 2. Click the tab More 
 # 3. Select Shell... 
 ## Run Rscript from Shell 
-# 1. In the Shell, run the command: nohup R CMD BATCH main.R > main.log & 
+# 1. In the Shell, run the command: nohup R CMD BATCH main.R > main.log &
 # 2. Close the Shell window 
 
 library(tidyverse)
@@ -14,9 +14,6 @@ library(rgdal)
 library(spgwr)
 library(parallel)
 source("par_ggwr.R")
-
-# Set number of cores 
-n_cores <- 32L
 
 # Read training_samplesamples as tibble 
 training_samples <- readr::read_csv("./data/train_data_cci20.csv")
@@ -63,16 +60,16 @@ vgi_data <-
 # Create vgi grid output
 grid_cont <- sf::st_make_grid(vgi_data, cellsize = 0.1, what = "centers")
 
-## Subset for testing 
+# Subset for testing
 # aux <- grid_cont
 # grid_cont <- aux %>%
 #   sf::st_sf() %>%
-#   dplyr::slice(1:100) %>%
+#   dplyr::slice(1:2000) %>%
 #   sf::st_geometry()
 
 # Run parallel 
-poc_time <- system.time(gwr_model <- par_ggwr(formula = value~1, data = as(vgi_data, "Spatial"), adapt = 0.01, n_cores = n_cores,
-                                              fit.points = as(grid_cont, "Spatial"), family = binomial, longlat = TRUE))
+poc_time <- system.time(gwr_model <- par_ggwr(formula = value~1, data = as(vgi_data, "Spatial"), adapt = 0.01, n_cores = 32L,
+                                              max_dist = 4000, fit.points = as(grid_cont, "Spatial"), family = binomial, longlat = TRUE))
 poc_time
 
 # Apply logistic transformation 
