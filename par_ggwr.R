@@ -9,11 +9,12 @@
 #' @param n_cores an integer. Default is all available cores minus one 
 #' @param max_dist maximum distance from the sample point in the metric of the points if longlat = FALSE, 
 #' or in kilometers if longlat = TRUE. Default is NULL.
+#' @param min_weight minimum weight for a sample point be considered in the regression. Default is NULL.
 #' @praam ... for other arguments see ?spgwr::ggwr 
 #' 
 par_ggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.Gauss, 
                    adapt = NULL, fit.points, family = gaussian, longlat = NULL,
-                   type = c("working", "deviance", "pearson", "response"), n_cores = parallel::detectCores() - 1, max_dist = NULL){
+                   type = c("working", "deviance", "pearson", "response"), n_cores = parallel::detectCores() - 1, max_dist = NULL, min_weight = NULL){
   
   type <- match.arg(type)
   resid_name <- paste(type, "resids", sep = "_")
@@ -145,10 +146,17 @@ par_ggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.G
     if(!is.null(max_dist))
       I <- which(dxs <= max_dist)
 
+    xx <- matrix(x[I,], ncol = 1)
+    yy <- y[I]
+    of <- offset[I]
     w.i <- gweight(dxs[I]^2, pto[3])
     
-    lm.i <- glm.fit(y = y[I], x = matrix(x[I,], ncol = 1), 
-                    weights = w.i, offset = offset[I], family = family)
+    J <- seq_along(w.i)
+    if(!is.null(min_weight))
+      J <- which(w.i >= min_weight)
+    
+    lm.i <- glm.fit(y = yy[J], x = xx[J], 
+                    weights = w.i[J], offset = of[J], family = family)
     
     sum.w <- sum(w.i)
     gwr.b <- coefficients(lm.i)
