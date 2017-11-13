@@ -97,9 +97,15 @@ par_ggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.G
   if (NROW(x) != NROW(coords)) 
     stop("Input data and coordinates have different dimensions")
   
-  cl <- parallel::makeForkCluster(nnodes = getOption("mc.cores", n_cores))
+  if(Sys.info()["sysname"] %in% c("Windows", "windows")){
+    cl <- parallel::makePSOCKcluster(names = getOption("mc.cores", n_cores))
+  } else {
+    cl <- parallel::makeForkCluster(nnodes = getOption("mc.cores", n_cores))
+  }
   
   # Set cluster env
+  parallel::clusterEvalQ(cl, library(stats))
+  parallel::clusterEvalQ(cl, library(sp))
   parallel::clusterEvalQ(cl, library(spgwr))
   varlist <- list("coords", "x", "y", "family", "offset", "type", "fp.given", "longlat", "adapt", "n", "max_dist")
   env <- new.env()
@@ -155,11 +161,11 @@ par_ggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.G
     if(!is.null(min_weight))
       J <- which(w.i >= min_weight)
     
-    lm.i <- glm.fit(y = yy[J], x = xx[J], 
+    lm.i <- stats::glm.fit(y = yy[J], x = xx[J], 
                     weights = w.i[J], offset = of[J], family = family)
     
     sum.w <- sum(w.i)
-    gwr.b <- coefficients(lm.i)
+    gwr.b <- stats::coefficients(lm.i)
     
     v_resids <- 0
     if (!fp.given)
