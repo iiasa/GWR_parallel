@@ -109,6 +109,8 @@ par_ggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.G
   parallel::clusterEvalQ(cl, library(spgwr))
   varlist <- list("coords", "x", "y", "family", "offset", "type", "fp.given", "longlat", "adapt", "n", "max_dist")
   env <- new.env()
+  assign("n", n, envir = env)
+  assign("m", m, envir = env)
   assign("coords", coords, envir = env)
   assign("y", y, envir = env)
   assign("x", x, envir = env)
@@ -152,7 +154,7 @@ par_ggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.G
     if(!is.null(max_dist))
       I <- which(dxs <= max_dist)
 
-    xx <- matrix(x[I,], ncol = 1)
+    xx <- matrix(x[I,], ncol = 2)
     yy <- y[I]
     of <- offset[I]
     w.i <- gweight(dxs[I]^2, pto[3])
@@ -161,15 +163,15 @@ par_ggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.G
     if(!is.null(min_weight))
       J <- which(w.i >= min_weight)
     
-    lm.i <- stats::glm.fit(y = yy[J], x = xx[J], 
-                    weights = w.i[J], offset = of[J], family = family)
+    lm.i <- glm.fit(y = yy[J], x = matrix(xx[J,], ncol = 2), weights = w.i[J], offset = of[J], family = family)
     
     sum.w <- sum(w.i)
-    gwr.b <- stats::coefficients(lm.i)
+    gwr.b <- matrix(coefficients(lm.i), nrow = 1, ncol = m)
+    colnames(gwr.b) <- colnames(x)
     
     v_resids <- 0
     if (!fp.given)
-      v_resids <- residuals.glm(lm.i, type = type)[1]
+      v_resids <- residuals.glm(lm.i, type = type)
     else is.na(v_resids) <- TRUE
     
     df.r <- lm.i$df.residual
@@ -185,7 +187,9 @@ par_ggwr <- function (formula, data = list(), coords, bandwidth, gweight = gwr.G
         dispersion <- NaN
       }
     }
-    return(data.frame(x = pto[1], y = pto[2], bw = pto[3], sum.w = sum.w, gwr.b, dispersion = dispersion, v_resids = v_resids))
+    df <- data.frame(x = pto[1], y = pto[2], bw = pto[3], sum.w = sum.w, gwr.b, dispersion = dispersion)
+    df[[resid_name]] <- v_resids
+    return(df)
   }
 
   cat("\nProcessing using",n_cores,"cores...")
